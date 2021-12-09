@@ -9,6 +9,7 @@ import haiku as hk
 import optax
 
 import tensorflow_datasets as tfds
+from tqdm import trange, tqdm
 
 from free.buffer.images import ImageBuffer
 from free.models.images import LeNet
@@ -43,9 +44,9 @@ def main(args):
     )
     opt = optax.adam(1e-3)
 
-    def loss(params: hk.Params, positive_image, negative_img, alpha) -> jnp.ndarray:
-        positive_energy = model.apply(params, positive_image)
-        negative_energy = model.apply(params, negative_img)
+    def loss(params: hk.Params, pos_image, neg_image, alpha) -> jnp.ndarray:
+        positive_energy = model.apply(params, pos_image)
+        negative_energy = model.apply(params, neg_image)
 
         loss = alpha * (positive_energy ** 2 + negative_energy ** 2)
         loss = loss + (positive_energy - negative_energy)
@@ -59,12 +60,12 @@ def main(args):
         pos_image,
         neg_image,
         alpha,
-    ) -> Tuple[hk.Params, optax.OptState]:
+    ) -> Tuple[jnp.ndarray, hk.Params, optax.OptState]:
         """Learning rule (stochastic gradient descent)."""
-        grads = jax.grad(loss)(params, pos_image, neg_image, alpha)
+        loss_value, grads = jax.value_and_grad(loss)(params, pos_image=pos_image, neg_image=neg_image, alpha=alpha)
         updates, opt_state = opt.update(grads, opt_state)
         new_params = optax.apply_updates(params, updates)
-        return new_params, opt_state
+        return loss_value, new_params, opt_state
 
     train = load_dataset("train", is_training=True, batch_size=128)
     prng = jax.random.PRNGKey(42)
@@ -73,9 +74,9 @@ def main(args):
     opt_state = opt.init(params)
     buffer = ImageBuffer(buffer_size=500, img_shape=next(train)["image"].shape)
     sampler = LangevinSampler(apply_fn=model.apply)
-    for epoch in range(args.num_epochs):
-
-        for step, batch in enumerate(train):
+    for epoch in trange(args.num_epochs):
+        iter_train = tqdm(enumerate(train), leave=False)
+        for step, batch in iter_train:
             buffer_key, prng = jax.random.split(prng)
             neg_image = buffer(buffer_key)
             neg_image, prng = sampler.perform_generation(
@@ -83,7 +84,10 @@ def main(args):
             )
             neg_image = jax.lax.stop_gradient(neg_image)
             pos_image = batch["image"]
-            update(params=params, opt_state=opt_state, pos_image=pos_image, neg_image=neg_image, alpha=1.)
+            loss_value, params, opt_state = update(
+                params=params, opt_state=opt_state, pos_image=pos_image, neg_image=neg_image, alpha=1.
+            )
+            iter_train.set_description(f"Loss value: {loss_value:.4f}")
             buffer.push(neg_image)
 
 

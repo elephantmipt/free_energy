@@ -14,6 +14,8 @@ class LangevinSampler(Sampler):
 
         energy_grad = jax.grad(energy)
         noise = jax.random.normal(key=key, shape=img.shape) * self.step_size * 2
+        e_grad = energy_grad(img, params)
+        e_grad = jax.lax.clamp(-0.01, e_grad, 0.01)
         next_img = img - self.step_size * energy_grad(img, params) + noise
         next_img = jax.lax.clamp(0., next_img, 1.)
         return next_img
