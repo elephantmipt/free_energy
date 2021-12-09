@@ -14,10 +14,6 @@ class LangevinSampler(Sampler):
 
     def step(self, img, params, key, *args, **kwargs):
 
-        @jax.jit
-        def energy(img, params):
-            return self.apply_fn(params, img).mean()
-
         energy_grad = jax.grad(energy)
         noise = jax.random.normal(key=key, shape=img.shape) * self.step_size * 2
         e_grad = energy_grad(img, params)

@@ -9,7 +9,7 @@ import haiku as hk
 import optax
 
 import tensorflow_datasets as tfds
-from tqdm import trange, tqdm
+from tqdm.auto import trange, tqdm
 
 from free.buffer.images import ImageBuffer
 from free.models.images import LeNet
@@ -44,6 +44,7 @@ def main(args):
     )
     opt = optax.adam(1e-3)
 
+    @jax.jit
     def loss(params: hk.Params, pos_image, neg_image, alpha) -> jnp.ndarray:
         positive_energy = model.apply(params, pos_image)
         negative_energy = model.apply(params, neg_image)
@@ -73,15 +74,29 @@ def main(args):
     params = model.init(init_rng, next(train)["image"])
     opt_state = opt.init(params)
     buffer = ImageBuffer(buffer_size=500, img_shape=next(train)["image"].shape)
-    sampler = LangevinSampler(apply_fn=model.apply)
+
+    @jax.jit
+    def energy(img, params):
+        return model.apply(params, img).mean()
+
+    @jax.jit
+    def energy_step(img, params, key, step_size=0.02):
+        energy_grad = jax.grad(energy)
+        noise = jax.random.normal(key=key, shape=img.shape) * step_size * 2
+        e_grad = energy_grad(img, params)
+        e_grad = jax.lax.clamp(-0.01, e_grad, 0.01)
+        next_img = img - step_size * e_grad + noise
+        next_img = jax.lax.clamp(0., next_img, 1.)
+        return next_img
+
     for epoch in trange(args.num_epochs):
         iter_train = tqdm(enumerate(train), leave=False)
         for step, batch in iter_train:
             buffer_key, prng = jax.random.split(prng)
             neg_image = buffer(buffer_key)
-            neg_image, prng = sampler.perform_generation(
-                start_img=neg_image, params=params, key=prng, num_steps=args.num_gen_steps
-            )
+            for e_s in range(args.num_gen_steps):
+                step_key, prng = jax.random.split(prng)
+                neg_image = energy_step(img=neg_image, params=params, key=step_key)
             neg_image = jax.lax.stop_gradient(neg_image)
             pos_image = batch["image"]
             loss_value, params, opt_state = update(
@@ -95,7 +110,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--num-epochs", default=10, type=int)
     parser.add_argument("--lr", default=1e-3, type=float)
-    parser.add_argument("--num-gen-steps", default=100, type=int)
+    parser.add_argument("--num-gen-steps", default=1000, type=int)
     parser.add_argument("--batch-size", default=128, type=int)
     args = parser.parse_args()
     main(args=args)
