@@ -11,9 +11,8 @@ import optax
 import tensorflow_datasets as tfds
 from tqdm.auto import trange, tqdm
 
-from free.buffer.images import ImageBuffer
+from free.buffer.images import SampleBuffer
 from free.models.images import LeNet
-from free.sampling.langevin import LangevinSampler
 
 Batch = Mapping[str, np.ndarray]
 
@@ -73,7 +72,8 @@ def main(args):
     init_rng, prng = jax.random.split(prng)
     params = model.init(init_rng, next(train)["image"])
     opt_state = opt.init(params)
-    buffer = ImageBuffer(buffer_size=500, img_shape=next(train)["image"].shape)
+    buffer = SampleBuffer(image_shape=next(train)["image"][0].shape)
+    batch_size = next(train)["image"].shape[0]
 
     @jax.jit
     def energy(img, params):
@@ -93,7 +93,7 @@ def main(args):
         iter_train = tqdm(enumerate(train), leave=False)
         for step, batch in iter_train:
             buffer_key, prng = jax.random.split(prng)
-            neg_image = buffer(buffer_key)
+            neg_image, neg_ids = buffer.sample(batch_size=batch_size, key=buffer_key)
             for e_s in range(args.num_gen_steps):
                 step_key, prng = jax.random.split(prng)
                 neg_image = energy_step(img=neg_image, params=params, key=step_key)
@@ -103,14 +103,14 @@ def main(args):
                 params=params, opt_state=opt_state, pos_image=pos_image, neg_image=neg_image, alpha=1.
             )
             iter_train.set_description(f"Loss value: {loss_value:.4f}")
-            buffer.push(neg_image)
+            buffer.push(neg_image, class_ids=jnp.zeros((batch_size,)))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--num-epochs", default=10, type=int)
     parser.add_argument("--lr", default=1e-3, type=float)
-    parser.add_argument("--num-gen-steps", default=1000, type=int)
+    parser.add_argument("--num-gen-steps", default=60, type=int)
     parser.add_argument("--batch-size", default=128, type=int)
     args = parser.parse_args()
     main(args=args)
