@@ -17,9 +17,9 @@ class SampleBuffer:
     def __len__(self):
         return len(self.buffer)
 
-    def push(self, samples, class_ids=None):
+    def push(self, samples, class_id=None):
         samples = np.asarray(samples)
-        class_ids = np.asarray(class_ids)
+        class_ids = np.asarray(class_id)
 
         for sample, class_id in zip(samples, class_ids):
             self.buffer.append((sample, class_id))
@@ -29,7 +29,7 @@ class SampleBuffer:
 
     def get(self, n_samples):
         items = random.choices(self.buffer, k=n_samples)
-        samples, class_ids = zip(*items)
+        samples, class_ids = items
         samples = jnp.stack(samples, 0)
         class_ids = jnp.array(class_ids)
         return samples, class_ids
