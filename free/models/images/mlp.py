@@ -11,8 +11,7 @@ class LeNet(hk.Module):
         self.activation = activation
 
     def __call__(self, x):
-        batch_size = x.shape[0]
-        x = x.reshape(batch_size, -1)
+        x = hk.Flatten()(x)
         x = self.lin_1(x)
         x = self.activation(x)
         x = self.lin_2(x)
