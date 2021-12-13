@@ -2,3 +2,5 @@ jax
 dm-haiku
 optax
 tensorflow_datasets
+matplotlib
+seaborn
